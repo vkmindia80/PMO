@@ -31,6 +31,17 @@ MONGO_URL = os.getenv("MONGO_URL")
 client = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
 db = client.portfolio_db
 
+# JWT Configuration
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here-change-in-production")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Security
+security = HTTPBearer()
+
 # Create uploads directory
 upload_dir = Path("uploads")
 upload_dir.mkdir(exist_ok=True)
