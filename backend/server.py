@@ -224,7 +224,10 @@ async def get_current_user_optional(credentials: Optional[HTTPAuthorizationCrede
         return None
 
 async def get_user_by_email(email: str):
-    return await db.users.find_one({"email": email})
+    user = await db.users.find_one({"email": email})
+    if user and "_id" in user:
+        del user["_id"]  # Remove MongoDB ObjectId
+    return user
 
 async def create_demo_user(user_data):
     # Check if user already exists
