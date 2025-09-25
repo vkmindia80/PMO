@@ -652,34 +652,12 @@ async def create_demo_users():
     ]
     
     created_users = []
-    
     for user_data in demo_users:
-        # Check if user already exists
-        existing = await get_user_by_email(user_data["email"])
-        if existing:
-            continue
-            
-        user_id = generate_id()
-        now = datetime.utcnow()
-        hashed_password = get_password_hash(user_data["password"])
-        
-        user_doc = {
-            "id": user_id,
-            "name": user_data["name"],
-            "email": user_data["email"],
-            "password": hashed_password,
-            "title": user_data["title"],
-            "bio": user_data["bio"],
-            "skills": user_data["skills"],
-            "social_links": user_data["social_links"],
-            "created_at": now,
-            "updated_at": now
-        }
-        
-        await db.users.insert_one(user_doc)
-        created_users.append({k: v for k, v in user_doc.items() if k != "password"})
+        user = await create_demo_user(user_data)
+        if user:
+            created_users.append(user)
     
-    return {"message": f"Created {len(created_users)} demo users", "users": created_users}
+    return {"message": f"Created {len(created_users)} demo users", "count": len(created_users)}
 
 if __name__ == "__main__":
     import uvicorn
