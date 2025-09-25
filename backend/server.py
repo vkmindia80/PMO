@@ -938,7 +938,7 @@ async def advanced_search(
             "$or": [
                 {"name": {"$regex": query, "$options": "i"}},
                 {"title": {"$regex": query, "$options": "i"}},
-                {"skills": {"$in": [{"$regex": query, "$options": "i"}]}}
+                {"skills": {"$regex": query, "$options": "i"}}
             ]
         }
         
