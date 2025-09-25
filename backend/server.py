@@ -186,6 +186,32 @@ async def get_current_user_optional(credentials: Optional[HTTPAuthorizationCrede
 async def get_user_by_email(email: str):
     return await db.users.find_one({"email": email})
 
+async def create_demo_user(user_data):
+    # Check if user already exists
+    existing = await get_user_by_email(user_data["email"])
+    if existing:
+        return None
+        
+    user_id = generate_id()
+    now = datetime.utcnow()
+    hashed_password = get_password_hash(user_data["password"])
+    
+    user_doc = {
+        "id": user_id,
+        "name": user_data["name"],
+        "email": user_data["email"],
+        "password": hashed_password,
+        "title": user_data["title"],
+        "bio": user_data["bio"],
+        "skills": user_data["skills"],
+        "social_links": user_data["social_links"],
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    await db.users.insert_one(user_doc)
+    return {k: v for k, v in user_doc.items() if k != "password"}
+
 async def get_user_by_id(user_id: str):
     user = await db.users.find_one({"id": user_id})
     if not user:
