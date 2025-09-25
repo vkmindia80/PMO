@@ -1,14 +1,17 @@
-from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, Form
+from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, Form, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import motor.motor_asyncio
 import os
 from dotenv import load_dotenv
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 import aiofiles
 from pathlib import Path
+from passlib.context import CryptContext
+from jose import JWTError, jwt
 
 load_dotenv()
 
