@@ -259,6 +259,8 @@ async def get_user_by_id(user_id: str):
     user = await db.users.find_one({"id": user_id})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    if "_id" in user:
+        del user["_id"]  # Remove MongoDB ObjectId
     return user
 
 async def get_project_by_id(project_id: str):
