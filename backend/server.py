@@ -390,13 +390,19 @@ async def get_projects(
     return [ProjectResponse(**project) for project in projects]
 
 @app.get("/api/projects/{project_id}", response_model=ProjectResponse)
-async def get_project(project_id: str):
+async def get_project(project_id: str, current_user: dict = Depends(get_current_user)):
     project = await get_project_by_id(project_id)
+    # Ensure user can only access their own projects
+    if project["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
     return ProjectResponse(**project)
 
 @app.put("/api/projects/{project_id}", response_model=ProjectResponse)
-async def update_project(project_id: str, project_update: ProjectCreate):
-    await get_project_by_id(project_id)  # Check if project exists
+async def update_project(project_id: str, project_update: ProjectCreate, current_user: dict = Depends(get_current_user)):
+    project = await get_project_by_id(project_id)
+    # Ensure user can only update their own projects
+    if project["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
     
     update_doc = {
         "title": project_update.title,
@@ -416,8 +422,11 @@ async def update_project(project_id: str, project_update: ProjectCreate):
     return ProjectResponse(**updated_project)
 
 @app.delete("/api/projects/{project_id}")
-async def delete_project(project_id: str):
+async def delete_project(project_id: str, current_user: dict = Depends(get_current_user)):
     project = await get_project_by_id(project_id)
+    # Ensure user can only delete their own projects
+    if project["user_id"] != current_user["id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
     
     # Delete associated tasks
     await db.tasks.delete_many({"project_id": project_id})
