@@ -22,7 +22,7 @@ class AdvancedPortfolioAPITester:
         
         # Demo credentials from DEMO_CREDENTIALS.md
         self.demo_credentials = {
-            "email": "demo@portfolio.com",
+            "email": "john.doe@demo.com",
             "password": "demo123"
         }
         
