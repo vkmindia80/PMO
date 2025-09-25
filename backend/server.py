@@ -213,6 +213,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     user = await db.users.find_one({"id": user_id})
     if user is None:
         raise credentials_exception
+    if "_id" in user:
+        del user["_id"]  # Remove MongoDB ObjectId
     return user
 
 async def get_current_user_optional(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
