@@ -267,6 +267,8 @@ async def get_project_by_id(project_id: str):
     project = await db.projects.find_one({"id": project_id})
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    if "_id" in project:
+        del project["_id"]  # Remove MongoDB ObjectId
     return project
 
 # PDF Generation Functions
