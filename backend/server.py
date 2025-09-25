@@ -204,6 +204,77 @@ async def get_project_by_id(project_id: str):
 async def health_check():
     return {"status": "healthy", "message": "Advanced Portfolio & Project Management System API"}
 
+# Authentication Endpoints
+@app.post("/api/auth/register", response_model=Token)
+async def register(user: UserRegister):
+    # Check if user already exists
+    existing_user = await get_user_by_email(user.email)
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Create new user
+    user_id = generate_id()
+    now = datetime.utcnow()
+    hashed_password = get_password_hash(user.password)
+    
+    user_doc = {
+        "id": user_id,
+        "name": user.name,
+        "email": user.email,
+        "password": hashed_password,
+        "title": user.title,
+        "bio": user.bio,
+        "skills": user.skills,
+        "social_links": user.social_links,
+        "created_at": now,
+        "updated_at": now
+    }
+    
+    await db.users.insert_one(user_doc)
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user_id}, expires_delta=access_token_expires
+    )
+    
+    # Remove password from response
+    user_response = {k: v for k, v in user_doc.items() if k != "password"}
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user_response
+    }
+
+@app.post("/api/auth/login", response_model=Token)
+async def login(user_credentials: UserLogin):
+    user = await get_user_by_email(user_credentials.email)
+    if not user or not verify_password(user_credentials.password, user["password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["id"]}, expires_delta=access_token_expires
+    )
+    
+    # Remove password from response
+    user_response = {k: v for k, v in user.items() if k != "password"}
+    
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user_response
+    }
+
+@app.get("/api/auth/me")
+async def get_current_user_info(current_user: dict = Depends(get_current_user)):
+    return {k: v for k, v in current_user.items() if k != "password"}
+
 # User Management Endpoints
 @app.post("/api/users", response_model=UserResponse)
 async def create_user(user: UserCreate):
