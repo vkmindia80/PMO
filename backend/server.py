@@ -12,6 +12,7 @@ from typing import List, Optional
 import aiofiles
 from pathlib import Path
 from passlib.context import CryptContext
+import bcrypt
 from jose import JWTError, jwt
 import json
 from reportlab.lib.pagesizes import letter, A4
