@@ -15,7 +15,8 @@ const Navbar = ({
   users, 
   onToggleSidebar, 
   onSwitchUser, 
-  onCreateUser 
+  onCreateUser,
+  onLogout
 }) => {
   const location = useLocation();
   const [showUserMenu, setShowUserMenu] = useState(false);
