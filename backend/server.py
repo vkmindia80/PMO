@@ -541,8 +541,9 @@ async def upload_file(project_id: str, file: UploadFile = File(...)):
 
 # Analytics Endpoints
 @app.get("/api/analytics/dashboard")
-async def get_dashboard_analytics(user_id: Optional[str] = None):
-    query = {"user_id": user_id} if user_id else {}
+async def get_dashboard_analytics(current_user: dict = Depends(get_current_user)):
+    user_id = current_user["id"]
+    query = {"user_id": user_id}
     
     # Project statistics
     total_projects = await db.projects.count_documents(query)
@@ -550,13 +551,12 @@ async def get_dashboard_analytics(user_id: Optional[str] = None):
     in_progress_projects = await db.projects.count_documents({**query, "status": "in-progress"})
     
     # Task statistics
+    user_projects = await db.projects.find({"user_id": user_id}, {"id": 1}).to_list(length=None)
+    project_ids = [p["id"] for p in user_projects]
+    
     task_query = {}
-    if user_id:
-        # Get user's project IDs
-        user_projects = await db.projects.find({"user_id": user_id}, {"id": 1}).to_list(length=None)
-        project_ids = [p["id"] for p in user_projects]
-        if project_ids:
-            task_query["project_id"] = {"$in": project_ids}
+    if project_ids:
+        task_query["project_id"] = {"$in": project_ids}
     
     total_tasks = await db.tasks.count_documents(task_query)
     completed_tasks = await db.tasks.count_documents({**task_query, "status": "completed"})
@@ -582,6 +582,78 @@ async def get_dashboard_analytics(user_id: Optional[str] = None):
         },
         "project_types": {pt["_id"]: pt["count"] for pt in project_types}
     }
+
+# Demo data creation endpoint
+@app.post("/api/demo/create-users")
+async def create_demo_users():
+    """Create demo users for testing - remove in production"""
+    demo_users = [
+        {
+            "name": "John Doe",
+            "email": "john.doe@demo.com",
+            "password": "demo123",
+            "title": "Full Stack Developer",
+            "bio": "Passionate developer with 5+ years of experience in web development",
+            "skills": ["JavaScript", "Python", "React", "FastAPI", "MongoDB"],
+            "social_links": {
+                "github": "https://github.com/johndoe",
+                "linkedin": "https://linkedin.com/in/johndoe"
+            }
+        },
+        {
+            "name": "Sarah Smith", 
+            "email": "sarah.smith@demo.com",
+            "password": "demo123",
+            "title": "UX/UI Designer",
+            "bio": "Creative designer focused on user-centered design and digital experiences",
+            "skills": ["Figma", "Adobe Creative Suite", "Prototyping", "User Research"],
+            "social_links": {
+                "behance": "https://behance.net/sarahsmith",
+                "linkedin": "https://linkedin.com/in/sarahsmith"
+            }
+        },
+        {
+            "name": "Mike Johnson",
+            "email": "mike.johnson@demo.com", 
+            "password": "demo123",
+            "title": "Project Manager",
+            "bio": "Experienced project manager specializing in agile methodologies and team leadership",
+            "skills": ["Scrum", "Agile", "Jira", "Team Leadership", "Risk Management"],
+            "social_links": {
+                "linkedin": "https://linkedin.com/in/mikejohnson"
+            }
+        }
+    ]
+    
+    created_users = []
+    
+    for user_data in demo_users:
+        # Check if user already exists
+        existing = await get_user_by_email(user_data["email"])
+        if existing:
+            continue
+            
+        user_id = generate_id()
+        now = datetime.utcnow()
+        hashed_password = get_password_hash(user_data["password"])
+        
+        user_doc = {
+            "id": user_id,
+            "name": user_data["name"],
+            "email": user_data["email"],
+            "password": hashed_password,
+            "title": user_data["title"],
+            "bio": user_data["bio"],
+            "skills": user_data["skills"],
+            "social_links": user_data["social_links"],
+            "created_at": now,
+            "updated_at": now
+        }
+        
+        await db.users.insert_one(user_doc)
+        created_users.append({k: v for k, v in user_doc.items() if k != "password"})
+    
+    return {"message": f"Created {len(created_users)} demo users", "users": created_users}
 
 if __name__ == "__main__":
     import uvicorn
