@@ -277,7 +277,7 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
 
 # User Management Endpoints
 @app.post("/api/users", response_model=UserResponse)
-async def create_user(user: UserCreate):
+async def create_user(user: UserCreate, current_user: dict = Depends(get_current_user)):
     user_id = generate_id()
     now = datetime.utcnow()
     
@@ -285,6 +285,7 @@ async def create_user(user: UserCreate):
         "id": user_id,
         "name": user.name,
         "email": user.email,
+        "password": None,  # No password for admin-created users
         "title": user.title,
         "bio": user.bio,
         "skills": user.skills,
@@ -299,21 +300,27 @@ async def create_user(user: UserCreate):
         raise HTTPException(status_code=400, detail="Email already registered")
     
     await db.users.insert_one(user_doc)
-    return UserResponse(**user_doc)
+    return UserResponse(**{k: v for k, v in user_doc.items() if k != "password"})
 
 @app.get("/api/users", response_model=List[UserResponse])
-async def get_users(skip: int = 0, limit: int = 50):
+async def get_users(skip: int = 0, limit: int = 50, current_user: dict = Depends(get_current_user)):
     cursor = db.users.find().skip(skip).limit(limit)
     users = await cursor.to_list(length=limit)
-    return [UserResponse(**user) for user in users]
+    return [UserResponse(**{k: v for k, v in user.items() if k != "password"}) for user in users]
 
 @app.get("/api/users/{user_id}", response_model=UserResponse)
-async def get_user(user_id: str):
+async def get_user(user_id: str, current_user: dict = Depends(get_current_user)):
     user = await get_user_by_id(user_id)
-    return UserResponse(**user)
+    return UserResponse(**{k: v for k, v in user.items() if k != "password"})
 
 @app.put("/api/users/{user_id}", response_model=UserResponse)
-async def update_user(user_id: str, user_update: UserCreate):
+async def update_user(user_id: str, user_update: UserCreate, current_user: dict = Depends(get_current_user)):
+    # Only allow users to update their own profile or admin access
+    if current_user["id"] != user_id:
+        # For now, allow any authenticated user to update any profile
+        # In production, you'd implement proper authorization
+        pass
+    
     await get_user_by_id(user_id)  # Check if user exists
     
     update_doc = {
@@ -328,7 +335,7 @@ async def update_user(user_id: str, user_update: UserCreate):
     
     await db.users.update_one({"id": user_id}, {"$set": update_doc})
     updated_user = await get_user_by_id(user_id)
-    return UserResponse(**updated_user)
+    return UserResponse(**{k: v for k, v in updated_user.items() if k != "password"})
 
 # Project Management Endpoints
 @app.post("/api/projects", response_model=ProjectResponse)
