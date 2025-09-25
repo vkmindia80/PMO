@@ -339,8 +339,9 @@ async def update_user(user_id: str, user_update: UserCreate, current_user: dict 
 
 # Project Management Endpoints
 @app.post("/api/projects", response_model=ProjectResponse)
-async def create_project(project: ProjectCreate, user_id: str):
-    await get_user_by_id(user_id)  # Validate user exists
+async def create_project(project: ProjectCreate, current_user: dict = Depends(get_current_user)):
+    # Use current authenticated user
+    user_id = current_user["id"]
     
     project_id = generate_id()
     now = datetime.utcnow()
@@ -371,11 +372,14 @@ async def get_projects(
     status: Optional[str] = None,
     project_type: Optional[str] = None,
     skip: int = 0,
-    limit: int = 50
+    limit: int = 50,
+    current_user: dict = Depends(get_current_user)
 ):
-    query = {}
-    if user_id:
-        query["user_id"] = user_id
+    # If no user_id specified, use current user's projects
+    if not user_id:
+        user_id = current_user["id"]
+    
+    query = {"user_id": user_id}
     if status:
         query["status"] = status
     if project_type:
