@@ -77,12 +77,13 @@ export const apiService = {
   },
 
   getProjects: async (params = {}) => {
-    const { userId, status, projectType, skip = 0, limit = 50 } = params;
+    const { userId, status, projectType, search, skip = 0, limit = 50 } = params;
     const queryParams = new URLSearchParams();
     
     if (userId) queryParams.append('user_id', userId);
     if (status) queryParams.append('status', status);
     if (projectType) queryParams.append('project_type', projectType);
+    if (search) queryParams.append('search', search);
     queryParams.append('skip', skip);
     queryParams.append('limit', limit);
     
@@ -162,10 +163,58 @@ export const apiService = {
     return response.data;
   },
 
-  // Search functionality
+  // Enhanced Search functionality
+  advancedSearch: async (query, filters = {}) => {
+    const params = new URLSearchParams();
+    params.append('query', query);
+    
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value) {
+        params.append(key, value);
+      }
+    });
+    
+    const response = await api.get(`/api/search?${params}`);
+    return response.data;
+  },
+
   searchProjects: async (query, filters = {}) => {
     const params = { ...filters, search: query };
     return await apiService.getProjects(params);
+  },
+
+  // PDF Export functionality
+  exportPortfolioPDF: async (userId) => {
+    const response = await api.post('/api/export/pdf', {
+      user_id: userId,
+      export_type: 'portfolio',
+      include_projects: true,
+      include_tasks: false
+    });
+    return response.data;
+  },
+
+  exportProjectsPDF: async (userId, projectIds = null) => {
+    const exportData = {
+      user_id: userId,
+      export_type: 'projects',
+      include_projects: true,
+      include_tasks: true
+    };
+    
+    if (projectIds) {
+      exportData.project_ids = projectIds;
+    }
+    
+    const response = await api.post('/api/export/pdf', exportData);
+    return response.data;
+  },
+
+  downloadExportedFile: async (filename) => {
+    const response = await api.get(`/api/export/download/${filename}`, {
+      responseType: 'blob'
+    });
+    return response.data;
   },
 };
 
@@ -233,6 +282,18 @@ export const formatDateTime = (date) => {
     hour: '2-digit',
     minute: '2-digit'
   });
+};
+
+// PDF Download Helper
+export const downloadPDF = (blob, filename) => {
+  const url = window.URL.createObjectURL(new Blob([blob]));
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
 };
 
 export default api;
