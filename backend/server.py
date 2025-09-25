@@ -961,8 +961,39 @@ async def export_pdf(export_request: ExportRequest, current_user: dict = Depends
         if export_request.user_id != current_user["id"]:
             raise HTTPException(status_code=403, detail="Access denied")
         
-        # Get analytics data
-        analytics_data = await get_dashboard_analytics()
+        # Get analytics data by calling the analytics function directly
+        user_id = current_user["id"]
+        query = {"user_id": user_id}
+        
+        # Project statistics
+        total_projects = await db.projects.count_documents(query)
+        completed_projects = await db.projects.count_documents({**query, "status": "completed"})
+        in_progress_projects = await db.projects.count_documents({**query, "status": "in-progress"})
+        
+        # Task statistics
+        user_projects = await db.projects.find({"user_id": user_id}, {"id": 1}).to_list(length=None)
+        project_ids = [p["id"] for p in user_projects]
+        
+        task_query = {}
+        if project_ids:
+            task_query["project_id"] = {"$in": project_ids}
+        
+        total_tasks = await db.tasks.count_documents(task_query)
+        completed_tasks = await db.tasks.count_documents({**task_query, "status": "completed"})
+        
+        analytics_data = {
+            "projects": {
+                "total": total_projects,
+                "completed": completed_projects,
+                "in_progress": in_progress_projects,
+                "completion_rate": round((completed_projects / total_projects * 100) if total_projects > 0 else 0, 1)
+            },
+            "tasks": {
+                "total": total_tasks,
+                "completed": completed_tasks,
+                "completion_rate": round((completed_tasks / total_tasks * 100) if total_tasks > 0 else 0, 1)
+            }
+        }
         
         if export_request.export_type == "portfolio":
             # Get completed projects for portfolio
