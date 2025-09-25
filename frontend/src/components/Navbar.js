@@ -160,6 +160,20 @@ const Navbar = ({
                             Create New User
                           </button>
                         </div>
+
+                        <div className="border-t border-gray-200 py-2">
+                          <button
+                            onClick={() => {
+                              setShowUserMenu(false);
+                              onLogout();
+                            }}
+                            className="w-full flex items-center px-4 py-2 text-sm text-red-700 hover:bg-red-50 text-left"
+                            data-testid="logout-button"
+                          >
+                            <LogOut className="w-4 h-4 mr-3" />
+                            Sign Out
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
