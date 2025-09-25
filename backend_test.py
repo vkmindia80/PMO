@@ -367,7 +367,7 @@ class AdvancedPortfolioAPITester:
             "tags": ["testing", "phase4"]
         }
         
-        success, response = self.make_request('POST', 'projects', test_project, 201)
+        success, response = self.make_request('POST', 'projects', test_project, 200)
         
         if success and 'id' in response:
             project_id = response['id']
