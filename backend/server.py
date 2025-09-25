@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends, File, UploadFile, Form, sta
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.responses import FileResponse, Response
 import motor.motor_asyncio
 import os
 from dotenv import load_dotenv
@@ -12,6 +13,15 @@ import aiofiles
 from pathlib import Path
 from passlib.context import CryptContext
 from jose import JWTError, jwt
+import json
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
+import io
+import base64
 
 load_dotenv()
 
@@ -46,6 +56,11 @@ security = HTTPBearer()
 upload_dir = Path("uploads")
 upload_dir.mkdir(exist_ok=True)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
+# Create exports directory for PDFs
+export_dir = Path("exports")
+export_dir.mkdir(exist_ok=True)
+app.mount("/exports", StaticFiles(directory="exports"), name="exports")
 
 # Pydantic models
 from pydantic import BaseModel, Field
@@ -136,6 +151,13 @@ class TaskResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
+class ExportRequest(BaseModel):
+    user_id: str
+    export_type: str  # "portfolio", "projects", "analytics"
+    include_projects: bool = True
+    include_tasks: bool = False
+    project_ids: Optional[List[str]] = None
+
 # Utility functions
 def generate_id():
     return str(uuid.uuid4())
@@ -223,6 +245,190 @@ async def get_project_by_id(project_id: str):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return project
+
+# PDF Generation Functions
+def generate_portfolio_pdf(user_data, projects_data, analytics_data):
+    """Generate PDF for user portfolio"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72,
+                           topMargin=72, bottomMargin=18)
+    
+    # Get styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=24,
+        spaceAfter=30,
+        textColor=colors.HexColor("#1f2937"),
+        alignment=TA_CENTER
+    )
+    
+    heading_style = ParagraphStyle(
+        'CustomHeading',
+        parent=styles['Heading2'],
+        fontSize=16,
+        spaceAfter=12,
+        textColor=colors.HexColor("#374151")
+    )
+    
+    # Build PDF content
+    flowables = []
+    
+    # Title
+    flowables.append(Paragraph(f"{user_data['name']} - Portfolio", title_style))
+    flowables.append(Spacer(1, 20))
+    
+    # User info
+    if user_data.get('title'):
+        flowables.append(Paragraph(f"<b>Title:</b> {user_data['title']}", styles['Normal']))
+    if user_data.get('email'):
+        flowables.append(Paragraph(f"<b>Email:</b> {user_data['email']}", styles['Normal']))
+    if user_data.get('bio'):
+        flowables.append(Paragraph(f"<b>Bio:</b> {user_data['bio']}", styles['Normal']))
+    
+    flowables.append(Spacer(1, 20))
+    
+    # Skills
+    if user_data.get('skills'):
+        flowables.append(Paragraph("Skills & Technologies", heading_style))
+        skills_text = ", ".join(user_data['skills'])
+        flowables.append(Paragraph(skills_text, styles['Normal']))
+        flowables.append(Spacer(1, 20))
+    
+    # Analytics Summary
+    flowables.append(Paragraph("Portfolio Summary", heading_style))
+    summary_data = [
+        ['Total Projects', str(analytics_data.get('projects', {}).get('total', 0))],
+        ['Completed Projects', str(analytics_data.get('projects', {}).get('completed', 0))],
+        ['Completion Rate', f"{analytics_data.get('projects', {}).get('completion_rate', 0)}%"],
+        ['Total Tasks', str(analytics_data.get('tasks', {}).get('total', 0))],
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[3*inch, 2*inch])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#f3f4f6")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 12),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    
+    flowables.append(summary_table)
+    flowables.append(Spacer(1, 30))
+    
+    # Projects
+    if projects_data:
+        flowables.append(Paragraph("Featured Projects", heading_style))
+        
+        for project in projects_data[:10]:  # Limit to 10 projects
+            flowables.append(Paragraph(f"<b>{project['title']}</b>", styles['Heading3']))
+            flowables.append(Paragraph(project['description'], styles['Normal']))
+            
+            if project.get('technologies'):
+                tech_text = "Technologies: " + ", ".join(project['technologies'])
+                flowables.append(Paragraph(tech_text, styles['Italic']))
+            
+            flowables.append(Paragraph(f"Status: {project['status'].title()}", styles['Normal']))
+            flowables.append(Paragraph(f"Type: {project['project_type'].title()}", styles['Normal']))
+            flowables.append(Spacer(1, 15))
+    
+    # Generate timestamp
+    flowables.append(Spacer(1, 30))
+    timestamp = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+    flowables.append(Paragraph(f"Generated on {timestamp}", styles['Italic']))
+    
+    # Build PDF
+    doc.build(flowables)
+    buffer.seek(0)
+    return buffer
+
+def generate_projects_pdf(projects_data, user_name):
+    """Generate PDF report for projects"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72,
+                           topMargin=72, bottomMargin=18)
+    
+    # Get styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=20,
+        spaceAfter=30,
+        textColor=colors.HexColor("#1f2937"),
+        alignment=TA_CENTER
+    )
+    
+    # Build PDF content
+    flowables = []
+    
+    # Title
+    flowables.append(Paragraph(f"Projects Report - {user_name}", title_style))
+    flowables.append(Spacer(1, 20))
+    
+    # Projects summary table
+    project_table_data = [['Title', 'Status', 'Type', 'Priority', 'Created']]
+    
+    for project in projects_data:
+        created_date = datetime.fromisoformat(project['created_at'].replace('Z', '+00:00')).strftime('%m/%d/%Y') if project.get('created_at') else 'N/A'
+        project_table_data.append([
+            project['title'][:30] + '...' if len(project['title']) > 30 else project['title'],
+            project['status'].title(),
+            project['project_type'].title(),
+            project['priority'].title(),
+            created_date
+        ])
+    
+    projects_table = Table(project_table_data, colWidths=[2.5*inch, 1*inch, 1*inch, 1*inch, 1*inch])
+    projects_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#374151")),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('FONTSIZE', (0, 1), (-1, -1), 8),
+    ]))
+    
+    flowables.append(projects_table)
+    flowables.append(Spacer(1, 30))
+    
+    # Detailed project information
+    flowables.append(Paragraph("Project Details", styles['Heading2']))
+    flowables.append(Spacer(1, 12))
+    
+    for i, project in enumerate(projects_data[:5]):  # Detailed view for first 5 projects
+        flowables.append(Paragraph(f"{i+1}. {project['title']}", styles['Heading3']))
+        flowables.append(Paragraph(f"<b>Description:</b> {project['description']}", styles['Normal']))
+        
+        if project.get('technologies'):
+            tech_text = "<b>Technologies:</b> " + ", ".join(project['technologies'])
+            flowables.append(Paragraph(tech_text, styles['Normal']))
+        
+        flowables.append(Paragraph(f"<b>Status:</b> {project['status'].title()}", styles['Normal']))
+        flowables.append(Paragraph(f"<b>Priority:</b> {project['priority'].title()}", styles['Normal']))
+        
+        if project.get('start_date'):
+            start_date = datetime.fromisoformat(project['start_date'].replace('Z', '+00:00')).strftime('%B %d, %Y')
+            flowables.append(Paragraph(f"<b>Start Date:</b> {start_date}", styles['Normal']))
+        
+        flowables.append(Spacer(1, 15))
+    
+    # Generate timestamp
+    flowables.append(Spacer(1, 30))
+    timestamp = datetime.now().strftime("%B %d, %Y at %I:%M %p")
+    flowables.append(Paragraph(f"Generated on {timestamp}", styles['Italic']))
+    
+    # Build PDF
+    doc.build(flowables)
+    buffer.seek(0)
+    return buffer
 
 # API Routes
 
@@ -397,6 +603,7 @@ async def get_projects(
     user_id: Optional[str] = None,
     status: Optional[str] = None,
     project_type: Optional[str] = None,
+    search: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
     current_user: dict = Depends(get_current_user)
@@ -410,6 +617,13 @@ async def get_projects(
         query["status"] = status
     if project_type:
         query["project_type"] = project_type
+    if search:
+        query["$or"] = [
+            {"title": {"$regex": search, "$options": "i"}},
+            {"description": {"$regex": search, "$options": "i"}},
+            {"technologies": {"$in": [{"$regex": search, "$options": "i"}]}},
+            {"tags": {"$in": [{"$regex": search, "$options": "i"}]}}
+        ]
     
     cursor = db.projects.find(query).skip(skip).limit(limit).sort("created_at", -1)
     projects = await cursor.to_list(length=limit)
@@ -594,6 +808,21 @@ async def get_dashboard_analytics(current_user: dict = Depends(get_current_user)
     ]
     project_types = await db.projects.aggregate(pipeline).to_list(length=None)
     
+    # Activity over time (monthly breakdown for the past year)
+    year_ago = datetime.utcnow() - timedelta(days=365)
+    activity_pipeline = [
+        {"$match": {**query, "created_at": {"$gte": year_ago}}},
+        {"$group": {
+            "_id": {
+                "year": {"$year": "$created_at"},
+                "month": {"$month": "$created_at"}
+            },
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"_id.year": 1, "_id.month": 1}}
+    ]
+    monthly_activity = await db.projects.aggregate(activity_pipeline).to_list(length=None)
+    
     return {
         "projects": {
             "total": total_projects,
@@ -606,8 +835,165 @@ async def get_dashboard_analytics(current_user: dict = Depends(get_current_user)
             "completed": completed_tasks,
             "completion_rate": round((completed_tasks / total_tasks * 100) if total_tasks > 0 else 0, 1)
         },
-        "project_types": {pt["_id"]: pt["count"] for pt in project_types}
+        "project_types": {pt["_id"]: pt["count"] for pt in project_types},
+        "monthly_activity": monthly_activity
     }
+
+# Enhanced Search Endpoint
+@app.get("/api/search")
+async def advanced_search(
+    query: str,
+    type: Optional[str] = "all",  # all, projects, tasks, users
+    status: Optional[str] = None,
+    project_type: Optional[str] = None,
+    priority: Optional[str] = None,
+    limit: int = 50,
+    current_user: dict = Depends(get_current_user)
+):
+    """Advanced search across projects, tasks, and users"""
+    results = {
+        "projects": [],
+        "tasks": [],
+        "users": [],
+        "total": 0
+    }
+    
+    user_id = current_user["id"]
+    
+    # Search projects
+    if type in ["all", "projects"]:
+        project_query = {
+            "user_id": user_id,
+            "$or": [
+                {"title": {"$regex": query, "$options": "i"}},
+                {"description": {"$regex": query, "$options": "i"}},
+                {"technologies": {"$in": [{"$regex": query, "$options": "i"}]}},
+                {"tags": {"$in": [{"$regex": query, "$options": "i"}]}}
+            ]
+        }
+        
+        if status:
+            project_query["status"] = status
+        if project_type:
+            project_query["project_type"] = project_type
+        if priority:
+            project_query["priority"] = priority
+        
+        projects = await db.projects.find(project_query).limit(limit).to_list(length=limit)
+        results["projects"] = projects
+    
+    # Search tasks
+    if type in ["all", "tasks"]:
+        # Get user's project IDs first
+        user_projects = await db.projects.find({"user_id": user_id}, {"id": 1}).to_list(length=None)
+        project_ids = [p["id"] for p in user_projects]
+        
+        if project_ids:
+            task_query = {
+                "project_id": {"$in": project_ids},
+                "$or": [
+                    {"title": {"$regex": query, "$options": "i"}},
+                    {"description": {"$regex": query, "$options": "i"}}
+                ]
+            }
+            
+            if status:
+                task_query["status"] = status
+            if priority:
+                task_query["priority"] = priority
+            
+            tasks = await db.tasks.find(task_query).limit(limit).to_list(length=limit)
+            results["tasks"] = tasks
+    
+    # Search users (public profiles only)
+    if type in ["all", "users"]:
+        user_query = {
+            "$or": [
+                {"name": {"$regex": query, "$options": "i"}},
+                {"title": {"$regex": query, "$options": "i"}},
+                {"skills": {"$in": [{"$regex": query, "$options": "i"}]}}
+            ]
+        }
+        
+        users = await db.users.find(user_query, {"password": 0}).limit(limit).to_list(length=limit)
+        results["users"] = users
+    
+    results["total"] = len(results["projects"]) + len(results["tasks"]) + len(results["users"])
+    
+    return results
+
+# PDF Export Endpoints
+@app.post("/api/export/pdf")
+async def export_pdf(export_request: ExportRequest, current_user: dict = Depends(get_current_user)):
+    """Export user data as PDF"""
+    try:
+        # Get user data
+        user_data = await get_user_by_id(export_request.user_id)
+        
+        # Ensure user can only export their own data
+        if export_request.user_id != current_user["id"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Get analytics data
+        analytics_data = await get_dashboard_analytics()
+        
+        if export_request.export_type == "portfolio":
+            # Get completed projects for portfolio
+            projects_data = await db.projects.find({
+                "user_id": export_request.user_id,
+                "status": "completed"
+            }).to_list(length=None)
+            
+            # Generate portfolio PDF
+            pdf_buffer = generate_portfolio_pdf(user_data, projects_data, analytics_data)
+            filename = f"portfolio_{user_data['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+            
+        elif export_request.export_type == "projects":
+            # Get all or specific projects
+            if export_request.project_ids:
+                projects_data = await db.projects.find({
+                    "user_id": export_request.user_id,
+                    "id": {"$in": export_request.project_ids}
+                }).to_list(length=None)
+            else:
+                projects_data = await db.projects.find({
+                    "user_id": export_request.user_id
+                }).to_list(length=None)
+            
+            # Generate projects PDF
+            pdf_buffer = generate_projects_pdf(projects_data, user_data['name'])
+            filename = f"projects_{user_data['name'].replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+            
+        else:
+            raise HTTPException(status_code=400, detail="Invalid export type")
+        
+        # Save PDF to exports directory
+        file_path = export_dir / filename
+        with open(file_path, 'wb') as f:
+            f.write(pdf_buffer.getvalue())
+        
+        return {
+            "message": "PDF exported successfully",
+            "filename": filename,
+            "download_url": f"/exports/{filename}"
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+@app.get("/api/export/download/{filename}")
+async def download_export(filename: str):
+    """Download exported PDF file"""
+    file_path = export_dir / filename
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    return FileResponse(
+        path=str(file_path),
+        filename=filename,
+        media_type='application/pdf'
+    )
 
 # Demo data creation endpoint
 @app.post("/api/demo/create-users")
